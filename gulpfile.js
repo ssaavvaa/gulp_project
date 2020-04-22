@@ -1,110 +1,152 @@
-var gulp        = require('gulp'),
-    sass        = require('gulp-sass'),
-    rename      = require('gulp-rename'),
-    cssmin      = require('gulp-minify-css'),
-    concat      = require('gulp-concat'),
-    uglify      = require('gulp-uglify'),
-    jshint      = require('gulp-jshint'),
-    scsslint    = require('gulp-sass-lint'),
-    cache       = require('gulp-cached'),
-    prefix      = require('gulp-autoprefixer'),
-    browserSync = require('browser-sync'),
-    reload      = browserSync.reload,
-    minifyHTML  = require('gulp-minify-html'),
-    size        = require('gulp-size'),
-    imagemin    = require('gulp-imagemin'),
-    pngquant    = require('imagemin-pngquant'),
-    plumber     = require('gulp-plumber'),
-    deploy      = require('gulp-gh-pages'),
-    notify      = require('gulp-notify');
+"use strict";
 
+const gulp = require("gulp");
+const sass = require("gulp-sass");
+const postcss = require("gulp-postcss");
+const autoprefixer = require("autoprefixer");
+const csso = require("gulp-csso");
+const gcmq = require("gulp-group-css-media-queries");
+const del = require("del");
+const htmlmin = require("gulp-htmlmin");
+const imagemin = require("gulp-imagemin");
+const svgstore = require("gulp-svgstore");
+const plumber = require("gulp-plumber");
+const rigger = require("gulp-rigger");
+const stylelint = require("gulp-stylelint");
+const babel = require("gulp-babel");
+const uglify = require("gulp-uglify");
+const concat = require("gulp-concat");
+const rename = require("gulp-rename");
+const server = require("browser-sync").create();
+const sequence = require("run-sequence");
+const ghPages = require("gulp-gh-pages");
 
-gulp.task('scss', function() {
-    var onError = function(err) {
-      notify.onError({
-          title:    "Gulp",
-          subtitle: "Failure!",
-          message:  "Error: <%= error.message %>",
-          sound:    "Beep"
-      })(err);
-      this.emit('end');
-  };
+gulp.task("html", () => {
+  return gulp
+    .src("./src/pages/**/*.html")
+    .pipe(rigger())
+    .pipe(
+      htmlmin({
+        collapseWhitespace: true,
+      })
+    )
+    .pipe(gulp.dest("./build"));
+});
 
-  return gulp.src('scss/main.scss')
-    .pipe(plumber({errorHandler: onError}))
+gulp.task("styles", () => {
+  return gulp
+    .src("./src/sass/styles.scss")
+    .pipe(plumber())
+    .pipe(
+      stylelint({
+        reporters: [{ formatter: "string", console: true }],
+      })
+    )
     .pipe(sass())
-    .pipe(size({ gzip: true, showFiles: true }))
-    .pipe(prefix())
-    .pipe(rename('main.css'))
-    .pipe(gulp.dest('dist/css'))
-    .pipe(reload({stream:true}))
-    .pipe(cssmin())
-    .pipe(size({ gzip: true, showFiles: true }))
-    .pipe(rename({ suffix: '.min' }))
-    .pipe(gulp.dest('dist/css'))
+    .pipe(postcss([autoprefixer()]))
+    .pipe(gcmq())
+    .pipe(gulp.dest("./build/css"))
+    .pipe(csso())
+    .pipe(rename("styles.min.css"))
+    .pipe(gulp.dest("./build/css"))
+    .pipe(server.stream());
 });
 
-gulp.task('browser-sync', function() {
-    browserSync({
-        server: {
-            baseDir: "dist/"
-        }
-    });
-});
-
-gulp.task('deploy', function () {
-    return gulp.src('dist/**/*')
-        .pipe(deploy());
-});
-
-gulp.task('js', function() {
-  gulp.src('js/*.js')
+gulp.task("common_scripts", () => {
+  return gulp
+    .src("./src/js/common/*.js")
+    .pipe(plumber())
+    .pipe(
+      babel({
+        presets: ["@babel/env"],
+      })
+    )
     .pipe(uglify())
-    .pipe(size({ gzip: true, showFiles: true }))
-    .pipe(concat('j.js'))
-    .pipe(gulp.dest('dist/js'))
-    .pipe(reload({stream:true}));
+    .pipe(rename("scripts.min.js"))
+    .pipe(gulp.dest("./build/common_js"));
 });
 
-gulp.task('scss-lint', function() {
-  gulp.src('scss/**/*.scss')
-    .pipe(cache('scsslint'))
-    .pipe(scsslint());
+gulp.task("chunks_scripts", () => {
+  return gulp
+    .src("./src/js/chunks/*.js")
+    .pipe(plumber())
+    .pipe(
+      babel({
+        presets: ["@babel/env"],
+      })
+    )
+    .pipe(uglify())
+    .pipe(gulp.dest("./build/chunks_js"));
 });
 
-gulp.task('minify-html', function() {
-    var opts = {
-      comments:true,
-      spare:true
-    };
-
-  gulp.src('./*.html')
-    .pipe(minifyHTML(opts))
-    .pipe(gulp.dest('dist/'))
-    .pipe(reload({stream:true}));
+gulp.task("sprite", () => {
+  return gulp
+    .src("./src/images/icons/icon-*.svg")
+    .pipe(svgstore({ inlineSvg: true }))
+    .pipe(rename("sprite.svg"))
+    .pipe(gulp.dest("./build/images"));
 });
 
-gulp.task('jshint', function() {
-  gulp.src('js/*.js')
-    .pipe(jshint())
-    .pipe(jshint.reporter('default'));
+gulp.task("images", () => {
+  return gulp
+    .src(["./src/images/**/*.{png,jpg,jpeg,svg}", "!./src/images/icons/**/*"])
+    .pipe(
+      imagemin([
+        imagemin.jpegtran({ progressive: true }),
+        imagemin.optipng({ optimizationLevel: 3 }),
+        imagemin.svgo({
+          plugins: [{ removeViewBox: false }, { cleanupIDs: false }],
+        }),
+      ])
+    )
+    .pipe(gulp.dest("./build/images"));
 });
 
-gulp.task('watch', function() {
-  gulp.watch('scss/**/*.scss', ['scss']);
-  gulp.watch('js/*.js', ['jshint', 'js']);
-  gulp.watch('./*.html', ['minify-html']);
-  gulp.watch('img/*', ['imgmin']);
+gulp.task("fonts", () => {
+  return gulp.src("./src/fonts/**/*").pipe(gulp.dest("./build/fonts"));
 });
 
-gulp.task('imgmin', function () {
-    return gulp.src('img/*')
-        .pipe(imagemin({
-            progressive: true,
-            svgoPlugins: [{removeViewBox: false}],
-            use: [pngquant()]
-        }))
-        .pipe(gulp.dest('dist/img'));
+gulp.task("watch", () => {
+  gulp.watch("src/**/*.html", ["html"]).on("change", server.reload);
+  gulp.watch("src/sass/**/*.scss", ["styles"]);
+  gulp.watch("src/js/**/*.js", ["scripts"]).on("change", server.reload);
 });
 
-gulp.task('default', ['browser-sync', 'js', 'imgmin', 'minify-html', 'scss', 'watch']);
+gulp.task("serve", ["styles"], () => {
+  return server.init({
+    server: "./build",
+    notify: false,
+    open: true,
+    cors: true,
+    ui: false,
+    logPrefix: "DevServer",
+    host: "localhost",
+    port: 3000,
+  });
+});
+
+gulp.task("del:build", () => del("./build"));
+
+gulp.task("prepare", () => del(["**/.gitkeep", "README.md", "banner.png"]));
+
+gulp.task("build", (callback) =>
+  sequence(
+    "del:build",
+    [
+      "sprite",
+      "images",
+      "fonts",
+      "styles",
+      "html",
+      "common_scripts",
+      "chunks_scripts",
+    ],
+    callback
+  )
+);
+
+gulp.task("deploy", function () {
+  return gulp.src("./build/**/*").pipe(ghPages());
+});
+
+gulp.task("start", (callback) => sequence("build", "serve", "watch", callback));
